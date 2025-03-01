@@ -246,30 +246,6 @@ int display(struct Sheet* sheet) {
    return 0;
 }
 
-// int control(char* input, struct Sheet* sheet) {
-//    switch(input[0]) {
-//        case 'w':  // up
-//            if (sheet->view_row > 0) 
-//                sheet->view_row -= 10;
-//            break;
-//        case 's':  // down
-//            if (sheet->view_row + 10 < sheet->rows) 
-//                sheet->view_row += 10;
-//            break;
-//        case 'a':  // left
-//            if (sheet->view_col > 0) 
-//                sheet->view_col -= 10;
-//            break;
-//        case 'd':  // right
-//            if (sheet->view_col + 10 < sheet->cols) 
-//                sheet->view_col += 10;
-//            break;
-//        default:
-//            return 1;  // Error for invalid input
-//    }
-//    return 0;  // Success
-// }
-
 int control(char* input, struct Sheet* sheet) {
     switch (input[0]) {
         case 'w':  // Move up

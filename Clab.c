@@ -20,7 +20,7 @@ enum CommandType {
 
 struct Command {
    enum CommandType type;
-   char* args[3];   // Dynamic array to store arguments
+   char* args[4];   // Dynamic array to store arguments
 };
 
 struct Sheet {
@@ -304,7 +304,7 @@ struct Command* parse_input(char* input) {
     struct Command* cmd = malloc(sizeof(struct Command));
     if (cmd == NULL) return NULL;
     
-    for(int i = 0; i < 3; i++) {
+    for(int i = 0; i < 4; i++) {
         cmd->args[i] = NULL;
     }
  
@@ -374,9 +374,41 @@ struct Command* parse_input(char* input) {
         // Look for arithmetic operators
         char* operator = strpbrk(value, "+-*/");
         if (operator != NULL) {
-            // Handle arithmetic (existing code)
+            printf("Found operator: %c\n", *operator);
+            // Store the operator character
+            char opcode = *operator;
+            *operator = '\0';  // Split at operator
+            printf("Cell: %s, First operand: %s, Second operand: %s\n",cell,value,operator+1);
             cmd->type = CMD_SETARITH;
-            // ... rest of arithmetic handling ...
+            cmd->args[0] = malloc(strlen(cell) + 1);
+            cmd->args[1] = malloc(strlen(value) + 1);
+            cmd->args[2] = malloc(strlen(operator+1)+1);
+            cmd->args[3] = malloc(2);  // +2 for operator and null terminator
+            
+            if(cmd->args[0] && cmd->args[1] && cmd->args[2] && cmd->args[3]) {
+                strcpy(cmd->args[0], cell);     // Target cell
+                strcpy(cmd->args[1], value);    // First operand
+                strcpy(cmd->args[2], operator + 1); // Second operand
+                
+                // Append the operator to args[2]
+                cmd->args[3][0]= opcode;
+                cmd->args[3][1] = '\0';
+                return cmd;
+            } else {
+                printf("Memory allocation failed\n");
+                // Clean up if any allocation failed
+                free(cmd->args[0]);
+                free(cmd->args[1]);
+                free(cmd->args[2]);
+                free(cmd->args[3]);
+                cmd->args[0] = cmd->args[1] = cmd->args[2]= cmd->args[3] = NULL;
+                cmd->type = CMD_INVALID;
+                
+                // Restore the operator character in the string
+                *operator = opcode;
+                printf("Successfully created arithmetic command\n");
+                return cmd;
+            }
         } else if (strlen(value) > 0) {
             // Regular constant or cell reference assignment
             cmd->type = CMD_SETCONST;
@@ -392,7 +424,7 @@ struct Command* parse_input(char* input) {
  
     cmd->type = CMD_INVALID;
     return cmd;
- }
+}
 int main(int argc, char *argv[]) {
    struct Sheet* sheet = NULL;
    int state = 0;  // Will store this in sheet later
@@ -519,8 +551,10 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                     val1 = sheet->cells[row][col].value;
+                    print("%d",val1);
                 } else {
                     val1 = atoi(cmd->args[1]);
+
                 }
                 
                 if(cmd->args[2][0] >= 'A' && cmd->args[2][0] <= 'Z') {
@@ -538,14 +572,16 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                     val2 = sheet->cells[row][col].value;
+                    print("%d",val2);
                 } else {
                     val2 = atoi(cmd->args[2]);
                 }
                 
                 // In the CMD_SETARITH case:
         // Get operator (stored at end of args[2])
-        char op = cmd->args[2][strlen(cmd->args[2]) - 1];
+        char op = cmd->args[3][0];
         int opcode;
+        
         switch(op) {
             case '+': opcode = 1; break;
             case '-': opcode = 2; break;
@@ -654,7 +690,7 @@ int main(int argc, char *argv[]) {
        }
 
        // Free command and its arguments
-       for(int i = 0; i < 3; i++) {
+       for(int i = 0; i < 4; i++) {
            free(cmd->args[i]);
        }
        free(cmd);

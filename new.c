@@ -4,58 +4,49 @@
 #include<ctype.h>
 #include<math.h>
 #include<time.h>
+struct Sheet;
+struct Cell;
+int setarith(struct Cell* target_cell, int val1, int val2, int opcode);
+int setfunc(struct Cell* target_cell, int* values, int count, int opcode);
+void sleep(int seconds);
+void get_column_name(int col, char* buffer);
+typedef struct DependencyNode {
+    int row;
+    int col;
+    struct DependencyNode* next;
+} DependencyNode;
 struct Cell {
     int value;
     char* formula;
+    struct DependencyNode* depends_on;    // Cells that this cell depends on
+    struct DependencyNode* dependents;    // Cells that depend on this cell
 };
+
 
 enum CommandType {
-   CMD_CONTROL,     // w,a,s,d,q commands
-   CMD_SETCONST,    // direct value assignment
-   CMD_SETARITH,    // arithmetic operations
-   CMD_SETFUNC,     // functions like MIN, MAX etc
-   CMD_SETRANGE,    // range operations
-   CMD_INVALID      // for error handling
-};
-
-struct Command {
-   enum CommandType type;
-   char* args[4];   // Dynamic array to store arguments
-};
-
-struct Sheet {
-   struct Cell** cells;
-   int rows;
-   int cols;
-   int view_row;    // Top row of visible window
-   int view_col;    // Leftmost column of visible window
-   // No need for separate left,right,up,down as view_row and view_col define the window
-};
-
-
-// Helper function to calculate standard deviation
-// Custom square root implementation using Newton's method
-double sqrt(double x) {
-    if (x <= 0) return 0;
-    double guess = x / 2;
-    double prev;
-    do {
-        prev = guess;
-        guess = (guess + x / guess) / 2;
-    } while (prev - guess > 0.0001 || guess - prev > 0.0001);
-    return guess;
-}
-
-// Custom sleep implementation using a busy-wait loop
-void sleep(int seconds) {
-    clock_t end_time = clock() + seconds * CLOCKS_PER_SEC;
-    while (clock() < end_time) {
-        // Busy wait
-    }
-}
-
-// Helper function to calculate standard deviation
-double calculate_stdev(int* values, int count) {
+    CMD_CONTROL,     // w,a,s,d,q commands
+    CMD_SETCONST,    // direct value assignment
+    CMD_SETARITH,    // arithmetic operations
+    CMD_SETFUNC,     // functions like MIN, MAX etc
+    CMD_SETRANGE,    // range operations
+    CMD_INVALID      // for error handling
+ };
+ 
+ struct Command {
+    enum CommandType type;
+    char* args[4];   // Dynamic array to store arguments
+ };
+ 
+ struct Sheet {
+    struct Cell** cells;
+    int rows;
+    int cols;
+    int view_row;    // Top row of visible window
+    int view_col;    // Leftmost column of visible window
+    // No need for separate left,right,up,down as view_row and view_col define the window
+ };
+ 
+ double calculate_stdev(int* values, int count) {
     if (count <= 1) return 0;
     
     // Calculate mean
@@ -75,8 +66,131 @@ double calculate_stdev(int* values, int count) {
     // Return standard deviation
     return sqrt(sum_sq_diff / (count - 1));
 }
+// Helper function to add a dependency
+void add_dependency(struct Cell* dependent, int dep_row, int dep_col) {
+    // Check if dependency already exists
+    DependencyNode* curr = dependent->depends_on;
+    while (curr) {
+        if (curr->row == dep_row && curr->col == dep_col) {
+            return; // Dependency already exists
+        }
+        curr = curr->next;
+    }
+    
+    // Create new dependency node
+    DependencyNode* new_node = malloc(sizeof(DependencyNode));
+    if (!new_node) return;
+    
+    new_node->row = dep_row;
+    new_node->col = dep_col;
+    new_node->next = dependent->depends_on;
+    dependent->depends_on = new_node;
+}
 
-// Rest of setfunc remains the same
+// Helper function to add a dependent
+void add_dependent(struct Cell* dependency, int dep_row, int dep_col) {
+    // Check if dependent already exists
+    DependencyNode* curr = dependency->dependents;
+    while (curr) {
+        if (curr->row == dep_row && curr->col == dep_col) {
+            return; // Dependent already exists
+        }
+        curr = curr->next;
+    }
+    
+    // Create new dependent node
+    DependencyNode* new_node = malloc(sizeof(DependencyNode));
+    if (!new_node) return;
+    
+    new_node->row = dep_row;
+    new_node->col = dep_col;
+    new_node->next = dependency->dependents;
+    dependency->dependents = new_node;
+}
+
+// Helper function to clear all dependencies for a cell
+void clear_dependencies(struct Cell* cell) {
+    // Remove this cell from all cells it depends on
+    DependencyNode* curr = cell->depends_on;
+    while (curr) {
+        DependencyNode* dep_node = curr;
+        curr = curr->next;
+        
+        // Free the dependency node
+        free(dep_node);
+    }
+    cell->depends_on = NULL;
+}
+
+// Helper function to print dependencies
+void print_dependencies(struct Sheet* sheet) {
+    printf("\n--- Current Dependencies ---\n");
+    for (int i = 0; i < sheet->rows; i++) {
+        for (int j = 0; j < sheet->cols; j++) {
+            char cell_name[10];
+            get_column_name(j + 1, cell_name);
+            printf("%s%d: ", cell_name, i + 1);
+            
+            // Print dependencies
+            printf("depends on: ");
+            DependencyNode* curr = sheet->cells[i][j].depends_on;
+            if (!curr) {
+                printf("none");
+            } else {
+                while (curr) {
+                    char dep_name[10];
+                    get_column_name(curr->col + 1, dep_name);
+                    printf("%s%d ", dep_name, curr->row + 1);
+                    curr = curr->next;
+                }
+            }
+            
+            // Print dependents
+            printf(", dependents: ");
+            curr = sheet->cells[i][j].dependents;
+            if (!curr) {
+                printf("none");
+            } else {
+                while (curr) {
+                    char dep_name[10];
+                    get_column_name(curr->col + 1, dep_name);
+                    printf("%s%d ", dep_name, curr->row + 1);
+                    curr = curr->next;
+                }
+            }
+            printf("\n");
+        }
+    }
+    printf("-------------------------\n\n");
+}
+// Add these function definitions to your code
+int setarith(struct Cell* target_cell, int val1, int val2, int opcode) {
+    int result;
+    
+    switch(opcode) {
+        case 1:  // Addition
+            result = val1 + val2;
+            break;
+        case 2:  // Subtraction
+            result = val1 - val2;
+            break;
+        case 3:  // Multiplication
+            result = val1 * val2;
+            break;
+        case 4:  // Division
+            if(val2 == 0) {
+                return 1;  // Error: division by zero
+            }
+            result = val1 / val2;
+            break;
+        default:
+            return 1;  // Error: invalid operation
+    }
+    
+    target_cell->value = result;
+    return 0;
+}
+
 int setfunc(struct Cell* target_cell, int* values, int count, int opcode) {
     if (count <= 0) return 1;  // Error: empty range
     
@@ -130,8 +244,518 @@ int setfunc(struct Cell* target_cell, int* values, int count, int opcode) {
     }
     
     target_cell->value = result;
-    free(target_cell->formula);
-    target_cell->formula = NULL;
+    return 0;
+}
+int evaluate_cell(struct Sheet* sheet, int row, int col) {
+    struct Cell* cell = &sheet->cells[row][col];
+    
+    // If no formula, nothing to evaluate
+    if (!cell->formula) return 0;
+    
+    char* formula = strdup(cell->formula);
+    if (!formula) return 1;
+    
+    int result = 0;
+    
+    // Check if it's a simple cell reference (A1, B2, etc.)
+    if (formula[0] >= 'A' && formula[0] <= 'Z' && strchr(formula, '+') == NULL && 
+        strchr(formula, '-') == NULL && strchr(formula, '*') == NULL && 
+        strchr(formula, '/') == NULL && strchr(formula, '(') == NULL) {
+        
+        // Parse the cell reference
+        int source_row = 0, source_col = 0;
+        int i = 0;
+        while (formula[i] >= 'A' && formula[i] <= 'Z') {
+            source_col = source_col * 26 + (formula[i] - 'A' + 1);
+            i++;
+        }
+        source_col--; // Convert to 0-based indexing
+        source_row = atoi(formula + i) - 1; // -1 for 0-based indexing
+        
+        // Validate source row and column
+        if (source_row < 0 || source_row >= sheet->rows || 
+            source_col < 0 || source_col >= sheet->cols) {
+            free(formula);
+            return 1; // Error: invalid cell reference
+        }
+        
+        // Set the value from the referenced cell
+        cell->value = sheet->cells[source_row][source_col].value;
+        free(formula);
+        return 0;
+    }
+    
+    // Check for arithmetic operation
+    char* op_ptr = NULL;
+    if ((op_ptr = strchr(formula, '+')) || 
+        (op_ptr = strchr(formula, '-')) || 
+        (op_ptr = strchr(formula, '*')) || 
+        (op_ptr = strchr(formula, '/'))) {
+        
+        char op = *op_ptr;
+        *op_ptr = '\0'; // Split the formula at the operator
+        
+        char* left = formula;
+        char* right = op_ptr + 1;
+        
+        // Get values for both operands
+        int val1, val2;
+        
+        // Left operand
+        if (left[0] >= 'A' && left[0] <= 'Z') {
+            // Parse cell reference
+            int source_row = 0, source_col = 0;
+            int i = 0;
+            while (left[i] >= 'A' && left[i] <= 'Z') {
+                source_col = source_col * 26 + (left[i] - 'A' + 1);
+                i++;
+            }
+            source_col--; // Convert to 0-based indexing
+            source_row = atoi(left + i) - 1; // -1 for 0-based indexing
+            
+            // Validate source row and column
+            if (source_row < 0 || source_row >= sheet->rows || 
+                source_col < 0 || source_col >= sheet->cols) {
+                free(formula);
+                return 1; // Error: invalid cell reference
+            }
+            
+            val1 = sheet->cells[source_row][source_col].value;
+        } else {
+            val1 = atoi(left);
+        }
+        
+        // Right operand
+        if (right[0] >= 'A' && right[0] <= 'Z') {
+            // Parse cell reference
+            int source_row = 0, source_col = 0;
+            int i = 0;
+            while (right[i] >= 'A' && right[i] <= 'Z') {
+                source_col = source_col * 26 + (right[i] - 'A' + 1);
+                i++;
+            }
+            source_col--; // Convert to 0-based indexing
+            source_row = atoi(right + i) - 1; // -1 for 0-based indexing
+            
+            // Validate source row and column
+            if (source_row < 0 || source_row >= sheet->rows || 
+                source_col < 0 || source_col >= sheet->cols) {
+                free(formula);
+                return 1; // Error: invalid cell reference
+            }
+            
+            val2 = sheet->cells[source_row][source_col].value;
+        } else {
+            val2 = atoi(right);
+        }
+        
+        // Perform the arithmetic operation
+        int opcode;
+        switch (op) {
+            case '+': opcode = 1; break;
+            case '-': opcode = 2; break;
+            case '*': opcode = 3; break;
+            case '/': opcode = 4; break;
+            default:
+                free(formula);
+                return 1; // Error: invalid operator
+        }
+        
+        if (setarith(cell, val1, val2, opcode) != 0) {
+            free(formula);
+            return 1; // Error in arithmetic operation
+        }
+        
+        free(formula);
+        return 0;
+    }
+    
+    // Check for function calls
+    char* open_paren = strchr(formula, '(');
+    char* close_paren = strrchr(formula, ')');
+    
+    if (open_paren && close_paren) {
+        // Extract function name
+        int func_len = open_paren - formula;
+        char func_name[16] = {0}; // Buffer for function name
+        strncpy(func_name, formula, func_len);
+        
+        // Extract arguments
+        *close_paren = '\0'; // Terminate at close parenthesis
+        char* args = open_paren + 1;
+        
+        // Handle SLEEP function separately
+        if (strcmp(func_name, "SLEEP") == 0) {
+            int sleep_time = atoi(args);
+            if (sleep_time <= 0) {
+                free(formula);
+                return 1; // Error: invalid sleep time
+            }
+            
+            sleep(sleep_time);
+            cell->value = sleep_time;
+            free(formula);
+            return 0;
+        }
+        
+        // Handle other functions
+        int opcode;
+        if (strcmp(func_name, "MIN") == 0) opcode = 1;
+        else if (strcmp(func_name, "MAX") == 0) opcode = 2;
+        else if (strcmp(func_name, "AVG") == 0) opcode = 3;
+        else if (strcmp(func_name, "SUM") == 0) opcode = 4;
+        else if (strcmp(func_name, "STDEV") == 0) opcode = 5;
+        else {
+            free(formula);
+            return 1; // Error: unknown function
+        }
+        
+        // Parse the range
+        char* colon = strchr(args, ':');
+        int start_row, start_col, end_row, end_col;
+        
+        // Parse start cell
+        int i = 0;
+        start_col = 0;
+        while (args[i] >= 'A' && args[i] <= 'Z') {
+            start_col = start_col * 26 + (args[i] - 'A' + 1);
+            i++;
+        }
+        start_col--; // Convert to 0-based indexing
+        start_row = atoi(args + i) - 1; // -1 for 0-based indexing
+        
+        // If there's a range (colon found), parse end cell
+        if (colon) {
+            char* end_cell = colon + 1;
+            i = 0;
+            end_col = 0;
+            while (end_cell[i] >= 'A' && end_cell[i] <= 'Z') {
+                end_col = end_col * 26 + (end_cell[i] - 'A' + 1);
+                i++;
+            }
+            end_col--; // Convert to 0-based indexing
+            end_row = atoi(end_cell + i) - 1; // -1 for 0-based indexing
+        } else {
+            // Single cell case
+            end_row = start_row;
+            end_col = start_col;
+        }
+        
+        // Validate range
+        if (start_row < 0 || start_row >= sheet->rows || 
+            start_col < 0 || start_col >= sheet->cols ||
+            end_row < 0 || end_row >= sheet->rows ||
+            end_col < 0 || end_col >= sheet->cols ||
+            end_row < start_row || end_col < start_col) {
+            free(formula);
+            return 1; // Error: invalid range
+        }
+        
+        // Collect values from range
+        int rows = end_row - start_row + 1;
+        int cols = end_col - start_col + 1;
+        int count = rows * cols;
+        int* values = malloc(count * sizeof(int));
+        if (!values) {
+            free(formula);
+            return 1; // Error: memory allocation failed
+        }
+        
+        int idx = 0;
+        for (int r = start_row; r <= end_row; r++) {
+            for (int c = start_col; c <= end_col; c++) {
+                values[idx++] = sheet->cells[r][c].value;
+            }
+        }
+        
+        // Apply function
+        if (setfunc(cell, values, count, opcode) != 0) {
+            free(values);
+            free(formula);
+            return 1; // Error in function application
+        }
+        
+        free(values);
+        free(formula);
+        return 0;
+    }
+    
+    free(formula);
+    return 1; // No recognizable formula pattern
+}
+
+// Function to detect cycles in the dependency graph using DFS
+int detect_cycle(struct Sheet* sheet, int row, int col, int* visited, int* in_stack) {
+    int cell_idx = row * sheet->cols + col;
+    
+    // If already completely visited, no cycle here
+    if (visited[cell_idx]) return 0;
+    
+    // Mark as visited and in current path
+    visited[cell_idx] = 1;
+    in_stack[cell_idx] = 1;
+    
+    // Visit all dependencies
+    DependencyNode* curr = sheet->cells[row][col].depends_on;
+    while (curr) {
+        int dep_idx = curr->row * sheet->cols + curr->col;
+        
+        // If in current path, cycle detected
+        if (in_stack[dep_idx]) return 1;
+        
+        // If not visited yet, recurse
+        if (!visited[dep_idx]) {
+            if (detect_cycle(sheet, curr->row, curr->col, visited, in_stack)) {
+                return 1;
+            }
+        }
+        
+        curr = curr->next;
+    }
+    
+    // Remove from current path
+    in_stack[cell_idx] = 0;
+    return 0;
+}
+
+// Topological sort to determine evaluation order
+void topological_sort_visit(struct Sheet* sheet, int row, int col, int* visited, int** order, int* order_idx) {
+    int cell_idx = row * sheet->cols + col;
+    if (visited[cell_idx]) return;
+    
+    visited[cell_idx] = 1;
+    
+    // Visit all dependents first
+    DependencyNode* curr = sheet->cells[row][col].dependents;
+    while (curr) {
+        if (!visited[curr->row * sheet->cols + curr->col]) {
+            topological_sort_visit(sheet, curr->row, curr->col, visited, order, order_idx);
+        }
+        curr = curr->next;
+    }
+    
+    // Add current cell to the order
+    (*order)[*order_idx * 2] = row;
+    (*order)[*order_idx * 2 + 1] = col;
+    (*order_idx)++;
+}
+
+// Function to update all cells that depend on the given cell
+int update_dependencies(struct Sheet* sheet, int row, int col) {
+    int total_cells = sheet->rows * sheet->cols;
+    
+    // Arrays to track visited cells and build the evaluation order
+    int* visited = calloc(total_cells, sizeof(int));
+    int* eval_order = malloc(total_cells * 2 * sizeof(int)); // To store (row,col) pairs
+    
+    if (!visited || !eval_order) {
+        free(visited);
+        free(eval_order);
+        return 1; // Memory allocation failed
+    }
+    
+    int eval_count = 0;
+    
+    // Recursive function to collect all dependent cells
+    void collect_dependents(int r, int c) {
+        int cell_idx = r * sheet->cols + c;
+        if (visited[cell_idx]) return;
+        
+        visited[cell_idx] = 1;
+        
+        // Process all cells that depend on this one
+        DependencyNode* dep = sheet->cells[r][c].dependents;
+        while (dep) {
+            collect_dependents(dep->row, dep->col);
+            dep = dep->next;
+        }
+        
+        // Add this cell to the evaluation order (except the starting cell)
+        if (r != row || c != col) {
+            eval_order[eval_count * 2] = r;
+            eval_order[eval_count * 2 + 1] = c;
+            eval_count++;
+        }
+    }
+    
+    // Start the collection from the changed cell
+    collect_dependents(row, col);
+    
+    // Now evaluate all dependent cells in REVERSE ORDER
+    // This is crucial: we need to start from cells that depend directly on the changed cell
+    for (int i = eval_count - 1; i >= 0; i--) {
+        int r = eval_order[i * 2];
+        int c = eval_order[i * 2 + 1];
+        
+        printf("Updating dependent cell: %c%d\n", 'A' + c, r + 1); // Debug print
+        evaluate_cell(sheet, r, c);
+    }
+    
+    free(visited);
+    free(eval_order);
+    return 0;
+}
+
+// Helper function to calculate standard deviation
+// Custom square root implementation using Newton's method
+double sqrt(double x) {
+    if (x <= 0) return 0;
+    double guess = x / 2;
+    double prev;
+    do {
+        prev = guess;
+        guess = (guess + x / guess) / 2;
+    } while (prev - guess > 0.0001 || guess - prev > 0.0001);
+    return guess;
+}
+
+// Custom sleep implementation using a busy-wait loop
+void sleep(int seconds) {
+    clock_t end_time = clock() + seconds * CLOCKS_PER_SEC;
+    while (clock() < end_time) {
+        // Busy wait
+    }
+}
+
+// Helper function to calculate standard deviation
+
+
+// Rest of setfunc remains the same
+int handle_setfunc(struct Sheet* sheet, char* target_cell_ref, char* range_str, int opcode) {
+    int target_row = 0, target_col = 0;
+    
+    // Parse target cell reference
+    int i = 0;
+    while(target_cell_ref[i] >= 'A' && target_cell_ref[i] <= 'Z') {
+        target_col = target_col * 26 + (target_cell_ref[i] - 'A' + 1);
+        i++;
+    }
+    target_col--; // Convert to 0-based indexing
+    target_row = atoi(target_cell_ref + i) - 1; // -1 for 0-based indexing
+    
+    // Validate target cell
+    if(target_row < 0 || target_row >= sheet->rows || 
+       target_col < 0 || target_col >= sheet->cols) {
+        return 1; // Error: invalid cell reference
+    }
+    
+    // Clear existing dependencies
+    clear_dependencies(&sheet->cells[target_row][target_col]);
+    
+    // Special handling for SLEEP
+    if (opcode == 6) {
+        int sleep_time = atoi(range_str);
+        if (sleep_time <= 0) {
+            return 1; // Error: invalid sleep time
+        }
+        
+        // Store formula
+        char formula[256];
+        sprintf(formula, "SLEEP(%s)", range_str);
+        free(sheet->cells[target_row][target_col].formula);
+        sheet->cells[target_row][target_col].formula = strdup(formula);
+        
+        sleep(sleep_time);
+        sheet->cells[target_row][target_col].value = sleep_time;
+        
+        // Debug: Print dependencies
+        print_dependencies(sheet);
+        
+        // No need to update dependencies for SLEEP
+        return 0;
+    }
+    
+    // Handle range-based functions
+    char* colon = strchr(range_str, ':');
+    int start_row = 0, start_col = 0, end_row = 0, end_col = 0;
+    
+    // Parse start cell
+    i = 0;
+    while(range_str[i] >= 'A' && range_str[i] <= 'Z') {
+        start_col = start_col * 26 + (range_str[i] - 'A' + 1);
+        i++;
+    }
+    start_col--; // Convert to 0-based indexing
+    start_row = atoi(range_str + i) - 1; // -1 for 0-based indexing
+    
+    // If there's a range (colon found), parse end cell
+    if (colon) {
+        char* end_cell = colon + 1;
+        i = 0;
+        while(end_cell[i] >= 'A' && end_cell[i] <= 'Z') {
+            end_col = end_col * 26 + (end_cell[i] - 'A' + 1);
+            i++;
+        }
+        end_col--; // Convert to 0-based indexing
+        end_row = atoi(end_cell + i) - 1; // -1 for 0-based indexing
+    } else {
+        // Single cell case
+        end_row = start_row;
+        end_col = start_col;
+    }
+    
+    // Validate range
+    if (start_row < 0 || start_row >= sheet->rows || 
+        start_col < 0 || start_col >= sheet->cols ||
+        end_row < 0 || end_row >= sheet->rows ||
+        end_col < 0 || end_col >= sheet->cols ||
+        end_row < start_row || end_col < start_col) {
+        return 1; // Error: invalid range
+    }
+    
+    // Store formula
+    char func_name[10];
+    switch (opcode) {
+        case 1: strcpy(func_name, "MIN"); break;
+        case 2: strcpy(func_name, "MAX"); break;
+        case 3: strcpy(func_name, "AVG"); break;
+        case 4: strcpy(func_name, "SUM"); break;
+        case 5: strcpy(func_name, "STDEV"); break;
+        default: return 1; // Error: invalid function
+    }
+    
+    char formula[256];
+    sprintf(formula, "%s(%s)", func_name, range_str);
+    free(sheet->cells[target_row][target_col].formula);
+    sheet->cells[target_row][target_col].formula = strdup(formula);
+    
+    // Set up dependencies for each cell in the range
+    for (int r = start_row; r <= end_row; r++) {
+        for (int c = start_col; c <= end_col; c++) {
+            add_dependency(&sheet->cells[target_row][target_col], r, c);
+            add_dependent(&sheet->cells[r][c], target_row, target_col);
+        }
+    }
+    
+    // Collect values from range
+    int rows = end_row - start_row + 1;
+    int cols = end_col - start_col + 1;
+    int count = rows * cols;
+    int* values = malloc(count * sizeof(int));
+    if (!values) {
+        return 1; // Error: memory allocation failed
+    }
+    
+    int idx = 0;
+    for (int r = start_row; r <= end_row; r++) {
+        for (int c = start_col; c <= end_col; c++) {
+            values[idx++] = sheet->cells[r][c].value;
+        }
+    }
+    
+    // Apply function
+    if (setfunc(&sheet->cells[target_row][target_col], values, count, opcode) != 0) {
+        free(values);
+        return 1; // Error: function application failed
+    }
+    
+    free(values);
+    
+    // Debug: Print dependencies
+    print_dependencies(sheet);
+    
+    // Update dependent cells
+    update_dependencies(sheet, target_row, target_col);
     
     return 0;
 }
@@ -152,6 +776,9 @@ int setconst(char* cell_ref, char* value, struct Sheet* sheet) {
        target_col < 0 || target_col >= sheet->cols) {
         return 1; // Error: invalid cell reference
     }
+    
+    // Clear existing dependencies
+    clear_dependencies(&sheet->cells[target_row][target_col]);
     
     int val;
     
@@ -174,19 +801,35 @@ int setconst(char* cell_ref, char* value, struct Sheet* sheet) {
         }
         
         val = sheet->cells[source_row][source_col].value;
+        
+        // Set up dependency
+        add_dependency(&sheet->cells[target_row][target_col], source_row, source_col);
+        add_dependent(&sheet->cells[source_row][source_col], target_row, target_col);
+        
+        // Store formula
+        free(sheet->cells[target_row][target_col].formula);
+        sheet->cells[target_row][target_col].formula = strdup(value);
     } else {
         // Treat as integer constant
         val = atoi(value);
+        
+        // Clear formula
+        free(sheet->cells[target_row][target_col].formula);
+        sheet->cells[target_row][target_col].formula = NULL;
     }
     
     // Set the value
     sheet->cells[target_row][target_col].value = val;
-    // Clear any existing formula
-    free(sheet->cells[target_row][target_col].formula);
-    sheet->cells[target_row][target_col].formula = NULL;
+    
+    // Debug: Print dependencies
+    print_dependencies(sheet);
+    
+    // Update dependent cells
+    update_dependencies(sheet, target_row, target_col);
     
     return 0;
- }
+}
+
 
 // Converts column number to Excel-style column name (A, B, C, ... AA, AB, etc)
 void get_column_name(int col, char* buffer) {
@@ -285,33 +928,99 @@ int control(char* input, struct Sheet* sheet) {
     }
     return 0;  // Success
 }
-
-int setarith(struct Cell* target_cell, int val1, int val2, int opcode) {
-    int result;
+int handle_setarith(struct Sheet* sheet, char* target_cell_ref, char* left_operand, char* right_operand, char op) {
+    int target_row = 0, target_col = 0;
     
-    switch(opcode) {
-        case 1:  // Addition
-            result = val1 + val2;
-            break;
-        case 2:  // Subtraction
-            result = val1 - val2;
-            break;
-        case 3:  // Multiplication
-            result = val1 * val2;
-            break;
-        case 4:  // Division
-            if(val2 == 0) {
-                return 1;  // Error: division by zero
-            }
-            result = val1 / val2;
-            break;
-        default:
-            return 1;  // Error: invalid operation
+    // Parse target cell reference
+    int i = 0;
+    while(target_cell_ref[i] >= 'A' && target_cell_ref[i] <= 'Z') {
+        target_col = target_col * 26 + (target_cell_ref[i] - 'A' + 1);
+        i++;
+    }
+    target_col--; // Convert to 0-based indexing
+    target_row = atoi(target_cell_ref + i) - 1; // -1 for 0-based indexing
+    
+    // Validate target cell
+    if(target_row < 0 || target_row >= sheet->rows || 
+       target_col < 0 || target_col >= sheet->cols) {
+        return 1; // Error: invalid cell reference
     }
     
-    target_cell->value = result;
-    free(target_cell->formula);
-    target_cell->formula = NULL;
+    // Clear existing dependencies
+    clear_dependencies(&sheet->cells[target_row][target_col]);
+    
+    // Get values for both operands (could be cell refs or constants)
+    int val1, val2;
+    int left_row = -1, left_col = 0;  // Initialize to 0, not -1
+    int right_row = -1, right_col = 0;  // Initialize to 0, not -1
+    
+    if(left_operand[0] >= 'A' && left_operand[0] <= 'Z') {
+        // First arg is cell reference
+        i = 0;
+        while(left_operand[i] >= 'A' && left_operand[i] <= 'Z') {
+            left_col = left_col * 26 + (left_operand[i] - 'A' + 1);
+            i++;
+        }
+        left_col--;
+        left_row = atoi(left_operand + i) - 1;
+        if(left_row < 0 || left_row >= sheet->rows || left_col < 0 || left_col >= sheet->cols) {
+            return 1; // Error: invalid cell reference
+        }
+        val1 = sheet->cells[left_row][left_col].value;
+        
+        // Add dependency relationship
+        add_dependency(&sheet->cells[target_row][target_col], left_row, left_col);
+        add_dependent(&sheet->cells[left_row][left_col], target_row, target_col);
+    } else {
+        val1 = atoi(left_operand);
+    }
+    
+    if(right_operand[0] >= 'A' && right_operand[0] <= 'Z') {
+        // Second arg is cell reference
+        i = 0;
+        while(right_operand[i] >= 'A' && right_operand[i] <= 'Z') {
+            right_col = right_col * 26 + (right_operand[i] - 'A' + 1);
+            i++;
+        }
+        right_col--;
+        right_row = atoi(right_operand + i) - 1;
+        if(right_row < 0 || right_row >= sheet->rows || right_col < 0 || right_col >= sheet->cols) {
+            return 1; // Error: invalid cell reference
+        }
+        val2 = sheet->cells[right_row][right_col].value;
+        
+        // Add dependency relationship
+        add_dependency(&sheet->cells[target_row][target_col], right_row, right_col);
+        add_dependent(&sheet->cells[right_row][right_col], target_row, target_col);
+    } else {
+        val2 = atoi(right_operand);
+    }
+    
+    // Store the formula
+    char formula[256];
+    sprintf(formula, "%s%c%s", left_operand, op, right_operand);
+    free(sheet->cells[target_row][target_col].formula);
+    sheet->cells[target_row][target_col].formula = strdup(formula);
+    
+    // Get operator and perform operation
+    int opcode;
+    switch(op) {
+        case '+': opcode = 1; break;
+        case '-': opcode = 2; break;
+        case '*': opcode = 3; break;
+        case '/': opcode = 4; break;
+        default: return 1; // Error: invalid operator
+    }
+    
+    if (setarith(&sheet->cells[target_row][target_col], val1, val2, opcode) != 0) {
+        return 1; // Error: arithmetic error
+    }
+    
+    // Debug: Print dependencies
+    print_dependencies(sheet);
+    
+    // Update dependent cells
+    update_dependencies(sheet, target_row, target_col);
     
     return 0;
 }
@@ -459,309 +1168,157 @@ struct Command* parse_input(char* input) {
     return cmd;
 }
 int main(int argc, char *argv[]) {
-   struct Sheet* sheet = NULL;
-   int state = 0;  // Will store this in sheet later
-   char input[1024];
-
-   if (state == 0) {
-       // Original initialization code
-       if (argc != 3) {
-           printf("Usage: ./sheet <rows> <cols>\n"); 
-           return 1;
-       }
-
-       sheet = malloc(sizeof(struct Sheet));
-       if (sheet == NULL) {
-           printf("Memory allocation failed\n");
-           return 1;
-       }
-
-       sheet->rows = atoi(argv[1]);
-       sheet->cols = atoi(argv[2]);
-       sheet->view_row = 0;
-       sheet->view_col = 0;
-
-       // Allocate array of row pointers
-       sheet->cells = malloc(sheet->rows * sizeof(struct Cell*));
-       if (sheet->cells == NULL) {
-           free(sheet);
-           printf("Memory allocation failed\n");
-           return 1;
-       }
-
-       // Allocate each row and initialize cells to 0
-       for (int i = 0; i < sheet->rows; i++) {
-           sheet->cells[i] = malloc(sheet->cols * sizeof(struct Cell));
-           if (sheet->cells[i] == NULL) {
-               // Free previously allocated rows
-               for (int j = 0; j < i; j++) {
-                   free(sheet->cells[j]);
-               }
-               free(sheet->cells);
-               free(sheet);
-               printf("Memory allocation failed\n");
-               return 1;
-           }
-           
-           // Initialize each cell in this row to 0
-           for (int j = 0; j < sheet->cols; j++) {
-               sheet->cells[i][j].value = 0;
-               sheet->cells[i][j].formula = NULL;
-           }
-       }
-       
-       state = 1;
-       display(sheet);  // Initial display after initialization
-   }
-
-   // Main program loop
-   while(state == 1) {
-       printf("> ");
-       
-       if (fgets(input, sizeof(input), stdin) == NULL) {
-           break;
-       }
-       
-       // Remove newline if present
-       input[strcspn(input, "\n")] = 0;
-
-       struct Command* cmd = parse_input(input);
-       if (cmd == NULL) {
-           printf("Memory allocation failed\n");
-           continue;
-       }
-
-       // Handle command
-       switch(cmd->type) {
-           case CMD_CONTROL:
-               if (cmd->args[0][0] == 'q') {
-                   state = 0;  // Exit program
-               }
-               else {
-                   control(cmd->args[0], sheet);
-                   display(sheet);  // Display after control command
-               }
-               break;
-
-           case CMD_SETCONST:
-               if (setconst(cmd->args[0], cmd->args[1], sheet) != 0) {
-                   printf("Invalid cell reference or value\n");
-               }
-               display(sheet);
-               break;
-               case CMD_SETARITH: {
-                // Parse target cell
-                int target_row = 0, target_col = 0;
-                int i = 0;
-                while(cmd->args[0][i] >= 'A' && cmd->args[0][i] <= 'Z') {
-                    target_col = target_col * 26 + (cmd->args[0][i] - 'A' + 1);
-                    i++;
+    struct Sheet* sheet = NULL;
+    int state = 0;  // Will store this in sheet later
+    char input[1024];
+ 
+    if (state == 0) {
+        // Original initialization code
+        if (argc != 3) {
+            printf("Usage: ./sheet <rows> <cols>\n"); 
+            return 1;
+        }
+ 
+        sheet = malloc(sizeof(struct Sheet));
+        if (sheet == NULL) {
+            printf("Memory allocation failed\n");
+            return 1;
+        }
+        // Initialize each cell in this row to 0
+ 
+        sheet->rows = atoi(argv[1]);
+        sheet->cols = atoi(argv[2]);
+        sheet->view_row = 0;
+        sheet->view_col = 0;
+ 
+        // Allocate array of row pointers
+        sheet->cells = malloc(sheet->rows * sizeof(struct Cell*));
+        if (sheet->cells == NULL) {
+            free(sheet);
+            printf("Memory allocation failed\n");
+            return 1;
+        }
+ 
+        // Allocate each row and initialize cells to 0
+        for (int i = 0; i < sheet->rows; i++) {
+            sheet->cells[i] = malloc(sheet->cols * sizeof(struct Cell));
+            if (sheet->cells[i] == NULL) {
+                // Free previously allocated rows
+                for (int j = 0; j < i; j++) {
+                    free(sheet->cells[j]);
                 }
-                target_col--; // Convert to 0-based indexing
-                target_row = atoi(cmd->args[0] + i) - 1;
-                
-                // Validate target cell
-                if(target_row < 0 || target_row >= sheet->rows || 
-                   target_col < 0 || target_col >= sheet->cols) {
-                    printf("Invalid target cell reference\n");
-                    break;
-                }
-                
-                // Get values for both operands (could be cell refs or constants)
-                int val1, val2;
-                if(cmd->args[1][0] >= 'A' && cmd->args[1][0] <= 'Z') {
-                    // First arg is cell reference
-                    int row = 0, col = 0;
-                    i = 0;
-                    while(cmd->args[1][i] >= 'A' && cmd->args[1][i] <= 'Z') {
-                        col = col * 26 + (cmd->args[1][i] - 'A' + 1);
-                        i++;
-                    }
-                    col--;
-                    row = atoi(cmd->args[1] + i) - 1;
-                    if(row < 0 || row >= sheet->rows || col < 0 || col >= sheet->cols) {
-                        printf("Invalid cell reference in first operand\n");
-                        break;
-                    }
-                    val1 = sheet->cells[row][col].value;
-                    printf("%d",val1);
-                } else {
-                    val1 = atoi(cmd->args[1]);
-
-                }
-                
-                if(cmd->args[2][0] >= 'A' && cmd->args[2][0] <= 'Z') {
-                    // Second arg is cell reference
-                    int row = 0, col = 0;
-                    i = 0;
-                    while(cmd->args[2][i] >= 'A' && cmd->args[2][i] <= 'Z') {
-                        col = col * 26 + (cmd->args[2][i] - 'A' + 1);
-                        i++;
-                    }
-                    col--;
-                    row = atoi(cmd->args[2] + i) - 1;
-                    if(row < 0 || row >= sheet->rows || col < 0 || col >= sheet->cols) {
-                        printf("Invalid cell reference in second operand\n");
-                        break;
-                    }
-                    val2 = sheet->cells[row][col].value;
-                    printf("%d",val2);
-                } else {
-                    val2 = atoi(cmd->args[2]);
-                }
-                
-                // In the CMD_SETARITH case:
-        // Get operator (stored at end of args[2])
-        char op = cmd->args[3][0];
-        int opcode;
-        
-        switch(op) {
-            case '+': opcode = 1; break;
-            case '-': opcode = 2; break;
-            case '*': opcode = 3; break;
-            case '/': opcode = 4; break;
-            default:
-                printf("Invalid operator\n");
-                break;
+                free(sheet->cells);
+                free(sheet);
+                printf("Memory allocation failed\n");
+                return 1;
+            }
+            
+            // Initialize each cell in this row to 0
+            for (int j = 0; j < sheet->cols; j++) {
+                sheet->cells[i][j].value = 0;
+                sheet->cells[i][j].formula = NULL;
+                sheet->cells[i][j].depends_on = NULL;
+                sheet->cells[i][j].dependents = NULL;
+            }
         }
         
-        if (setarith(&sheet->cells[target_row][target_col], val1, val2, opcode) != 0) {
-            printf("Arithmetic error (possibly division by zero)\n");
+        state = 1;
+        display(sheet);  // Initial display after initialization
+    }
+ 
+    // Main program loop
+    while(state == 1) {
+        printf("> ");
+        
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            break;
         }
-        display(sheet);
-                break;
-            }   
-           case CMD_INVALID:
-               printf("Invalid command\n");
-               break;
-
-                case CMD_SETFUNC: {
-                    // Parse target cell
-                    int target_row = 0, target_col = 0;
-                    int i = 0;
-                    while(cmd->args[0][i] >= 'A' && cmd->args[0][i] <= 'Z') {
-                        target_col = target_col * 26 + (cmd->args[0][i] - 'A' + 1);
-                        i++;
-                    }
-                    target_col--; // Convert to 0-based indexing
-                    target_row = atoi(cmd->args[0] + i) - 1;
-                
-                    // Validate target cell
-                    if (target_row < 0 || target_row >= sheet->rows || 
-                        target_col < 0 || target_col >= sheet->cols) {
-                        printf("Invalid target cell reference\n");
-                        break;
-                    }
-                
-                    int opcode = atoi(cmd->args[2]);
-                
-                    // Special handling for SLEEP
-                    if (opcode == 6) {  
-                        int sleep_time = atoi(cmd->args[1]); // Get the sleep duration
-                
-                        if (sleep_time <= 0) {  
-                            printf("SLEEP time must be a positive integer!\n");
-                            break;
-                        }
-                
-                        sleep(sleep_time);
-                        sheet->cells[target_row][target_col].value = sleep_time;
-                        display(sheet);
-                        break;
-                    }
-                
-                    // Handle other range-based functions
-                    char* range_str = cmd->args[1];
-                    char* colon = strchr(range_str, ':');
-                    int start_row = 0, start_col = 0, end_row = 0, end_col = 0;
-                
-                    // Parse start cell
-                    i = 0;
-                    while(range_str[i] >= 'A' && range_str[i] <= 'Z') {
-                        start_col = start_col * 26 + (range_str[i] - 'A' + 1);
-                        i++;
-                    }
-                    start_col--; // Convert to 0-based indexing
-                    start_row = atoi(range_str + i) - 1;
-                
-                    // If there's a range (colon found), parse end cell
-                    if (colon) {
-                        char* end_cell = colon + 1;
-                        i = 0;
-                        while(end_cell[i] >= 'A' && end_cell[i] <= 'Z') {
-                            end_col = end_col * 26 + (end_cell[i] - 'A' + 1);
-                            i++;
-                        }
-                        end_col--; // Convert to 0-based indexing
-                        end_row = atoi(end_cell + i) - 1;
-                    } else {
-                        // Single cell case
-                        end_row = start_row;
-                        end_col = start_col;
-                    }
-                
-                    // Validate range
-                    if (start_row < 0 || start_row >= sheet->rows || 
-                        start_col < 0 || start_col >= sheet->cols ||
-                        end_row < 0 || end_row >= sheet->rows ||
-                        end_col < 0 || end_col >= sheet->cols ||
-                        end_row < start_row || end_col < start_col) {
-                        printf("Invalid range specification\n");
-                        break;
-                    }
-                
-                    // Collect values from range
-                    int rows = end_row - start_row + 1;
-                    int cols = end_col - start_col + 1;
-                    int count = rows * cols;
-                    int* values = malloc(count * sizeof(int));
-                    if (!values) {
-                        printf("Memory allocation failed\n");
-                        break;
-                    }
-                
-                    int idx = 0;
-                    for (int r = start_row; r <= end_row; r++) {
-                        for (int c = start_col; c <= end_col; c++) {
-                            values[idx++] = sheet->cells[r][c].value;
-                        }
-                    }
-                
-                    // Apply function
-                    if (setfunc(&sheet->cells[target_row][target_col], values, count, opcode) != 0) {
-                        printf("Error applying function to range\n");
-                    }
-                
-                    free(values);
-                    display(sheet);
-                    break;
+        
+        // Remove newline if present
+        input[strcspn(input, "\n")] = 0;
+ 
+        struct Command* cmd = parse_input(input);
+        if (cmd == NULL) {
+            printf("Memory allocation failed\n");
+            continue;
+        }
+ 
+        // Handle command
+        switch(cmd->type) {
+            case CMD_CONTROL:
+                if (cmd->args[0][0] == 'q') {
+                    state = 0;  // Exit program
                 }
+                else {
+                    control(cmd->args[0], sheet);
+                    display(sheet);  // Display after control command
+                }
+                break;
+ 
+            case CMD_SETCONST:
+                if (setconst(cmd->args[0], cmd->args[1], sheet) != 0) {
+                    printf("Invalid cell reference or value\n");
+                }
+                display(sheet);
+                break;
                 
-
-       }
-
-       // Free command and its arguments
-       for(int i = 0; i < 4; i++) {
-           free(cmd->args[i]);
-       }
-       free(cmd);
-   }
-
-   // Cleanup code
-   if (sheet) {
-       if (sheet->cells) {
-           for (int i = 0; i < sheet->rows; i++) {
-               if (sheet->cells[i]) {
-                   for (int j = 0; j < sheet->cols; j++) {
-                       free(sheet->cells[i][j].formula);
-                   }
-                   free(sheet->cells[i]);
-               }
-           }
-           free(sheet->cells);
-       }
-       free(sheet);
-   }
-
-   return 0;
-}
+            case CMD_SETARITH:
+                if (handle_setarith(sheet, cmd->args[0], cmd->args[1], cmd->args[2], cmd->args[3][0]) != 0) {
+                    printf("Arithmetic error (possibly division by zero or invalid reference)\n");
+                }
+                display(sheet);
+                break;
+               
+            case CMD_INVALID:
+                printf("Invalid command\n");
+                break;
+ 
+            case CMD_SETFUNC:
+                if (handle_setfunc(sheet, cmd->args[0], cmd->args[1], atoi(cmd->args[2])) != 0) {
+                    printf("Error applying function to range\n");
+                }
+                display(sheet);
+                break;
+        }
+ 
+        // Free command and its arguments
+        for(int i = 0; i < 4; i++) {
+            free(cmd->args[i]);
+        }
+        free(cmd);
+    }
+ 
+    // Cleanup code
+    if (sheet) {
+        if (sheet->cells) {
+            for (int i = 0; i < sheet->rows; i++) {
+                if (sheet->cells[i]) {
+                    for (int j = 0; j < sheet->cols; j++) {
+                        // Free formula
+                        free(sheet->cells[i][j].formula);
+                        
+                        // Free dependency lists
+                        DependencyNode* curr = sheet->cells[i][j].depends_on;
+                        while (curr) {
+                            DependencyNode* temp = curr;
+                            curr = curr->next;
+                            free(temp);
+                        }
+                        
+                        curr = sheet->cells[i][j].dependents;
+                        while (curr) {
+                            DependencyNode* temp = curr;
+                            curr = curr->next;
+                            free(temp);
+                        }
+                    }
+                    free(sheet->cells[i]);
+                }
+            }
+            free(sheet->cells);
+        }
+        free(sheet);
+    }
+    
+    return 0;
+ }

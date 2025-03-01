@@ -366,20 +366,37 @@ struct Command* parse_input(char* input) {
             strncpy(func_name, value, func_len);
             
             // Get range between parentheses
-            char* range = open_paren + 1;
+            char* arg = open_paren + 1;
             *close_paren = '\0';
- 
+            
             cmd->type = CMD_SETFUNC;
             cmd->args[0] = strdup(cell);     // Target cell
-            cmd->args[1] = strdup(range);    // Range
+            //cmd->args[1] = strdup(range);    // Range
             
+            if (strcmp(func_name, "SLEEP") == 0) {
+                for (int i = 0; arg[i] != '\0'; i++) {
+                    if (!isdigit(arg[i])) {
+                        printf("SLEEP expects a positive integer as an argument!\n");
+                        cmd->type = CMD_INVALID;
+                        return cmd;
+                    }
+                }
+
+                cmd->args[1] = strdup(arg);
+                cmd->args[2] = strdup("6");
+                return cmd;
+            }
+
+            cmd->args[1] = strdup(arg);
+
+
             // Determine function type
             if (strcmp(func_name, "MIN") == 0) cmd->args[2] = strdup("1");
             else if (strcmp(func_name, "MAX") == 0) cmd->args[2] = strdup("2");
             else if (strcmp(func_name, "AVG") == 0) cmd->args[2] = strdup("3");
             else if (strcmp(func_name, "SUM") == 0) cmd->args[2] = strdup("4");
             else if (strcmp(func_name, "STDEV") == 0) cmd->args[2] = strdup("5");
-            else if (strcmp(func_name, "SLEEP") == 0) cmd->args[2] = strdup("6");
+            //else if (strcmp(func_name, "SLEEP") == 0) cmd->args[2] = strdup("6");
             else {
                 cmd->type = CMD_INVALID;
                 return cmd;
@@ -617,92 +634,110 @@ int main(int argc, char *argv[]) {
            case CMD_INVALID:
                printf("Invalid command\n");
                break;
-               case CMD_SETFUNC: {
-                // Parse target cell
-                int target_row = 0, target_col = 0;
-                int i = 0;
-                while(cmd->args[0][i] >= 'A' && cmd->args[0][i] <= 'Z') {
-                    target_col = target_col * 26 + (cmd->args[0][i] - 'A' + 1);
-                    i++;
-                }
-                target_col--; // Convert to 0-based indexing
-                target_row = atoi(cmd->args[0] + i) - 1;
-                
-                // Validate target cell
-                if(target_row < 0 || target_row >= sheet->rows || 
-                   target_col < 0 || target_col >= sheet->cols) {
-                    printf("Invalid target cell reference\n");
-                    break;
-                }
-                
-                // Parse range and collect values
-                char* range_str = cmd->args[1];
-                char* colon = strchr(range_str, ':');
-                int start_row = 0, start_col = 0, end_row = 0, end_col = 0;
-                
-                // Parse start cell
-                i = 0;
-                while(range_str[i] >= 'A' && range_str[i] <= 'Z') {
-                    start_col = start_col * 26 + (range_str[i] - 'A' + 1);
-                    i++;
-                }
-                start_col--; // Convert to 0-based indexing
-                start_row = atoi(range_str + i) - 1;
-                
-                // If there's a range (colon found), parse end cell
-                if (colon) {
-                    char* end_cell = colon + 1;
-                    i = 0;
-                    while(end_cell[i] >= 'A' && end_cell[i] <= 'Z') {
-                        end_col = end_col * 26 + (end_cell[i] - 'A' + 1);
+
+                case CMD_SETFUNC: {
+                    // Parse target cell
+                    int target_row = 0, target_col = 0;
+                    int i = 0;
+                    while(cmd->args[0][i] >= 'A' && cmd->args[0][i] <= 'Z') {
+                        target_col = target_col * 26 + (cmd->args[0][i] - 'A' + 1);
                         i++;
                     }
-                    end_col--; // Convert to 0-based indexing
-                    end_row = atoi(end_cell + i) - 1;
-                } else {
-                    // Single cell case
-                    end_row = start_row;
-                    end_col = start_col;
-                }
+                    target_col--; // Convert to 0-based indexing
+                    target_row = atoi(cmd->args[0] + i) - 1;
                 
-                // Validate range
-                if (start_row < 0 || start_row >= sheet->rows || 
-                    start_col < 0 || start_col >= sheet->cols ||
-                    end_row < 0 || end_row >= sheet->rows ||
-                    end_col < 0 || end_col >= sheet->cols ||
-                    end_row < start_row || end_col < start_col) {
-                    printf("Invalid range specification\n");
-                    break;
-                }
-                
-                // Collect values from range
-                int rows = end_row - start_row + 1;
-                int cols = end_col - start_col + 1;
-                int count = rows * cols;
-                int* values = malloc(count * sizeof(int));
-                if (!values) {
-                    printf("Memory allocation failed\n");
-                    break;
-                }
-                
-                int idx = 0;
-                for (int r = start_row; r <= end_row; r++) {
-                    for (int c = start_col; c <= end_col; c++) {
-                        values[idx++] = sheet->cells[r][c].value;
+                    // Validate target cell
+                    if (target_row < 0 || target_row >= sheet->rows || 
+                        target_col < 0 || target_col >= sheet->cols) {
+                        printf("Invalid target cell reference\n");
+                        break;
                     }
+                
+                    int opcode = atoi(cmd->args[2]);
+                
+                    // Special handling for SLEEP
+                    if (opcode == 6) {  
+                        int sleep_time = atoi(cmd->args[1]); // Get the sleep duration
+                
+                        if (sleep_time <= 0) {  
+                            printf("SLEEP time must be a positive integer!\n");
+                            break;
+                        }
+                
+                        sleep(sleep_time);
+                        sheet->cells[target_row][target_col].value = sleep_time;
+                        display(sheet);
+                        break;
+                    }
+                
+                    // Handle other range-based functions
+                    char* range_str = cmd->args[1];
+                    char* colon = strchr(range_str, ':');
+                    int start_row = 0, start_col = 0, end_row = 0, end_col = 0;
+                
+                    // Parse start cell
+                    i = 0;
+                    while(range_str[i] >= 'A' && range_str[i] <= 'Z') {
+                        start_col = start_col * 26 + (range_str[i] - 'A' + 1);
+                        i++;
+                    }
+                    start_col--; // Convert to 0-based indexing
+                    start_row = atoi(range_str + i) - 1;
+                
+                    // If there's a range (colon found), parse end cell
+                    if (colon) {
+                        char* end_cell = colon + 1;
+                        i = 0;
+                        while(end_cell[i] >= 'A' && end_cell[i] <= 'Z') {
+                            end_col = end_col * 26 + (end_cell[i] - 'A' + 1);
+                            i++;
+                        }
+                        end_col--; // Convert to 0-based indexing
+                        end_row = atoi(end_cell + i) - 1;
+                    } else {
+                        // Single cell case
+                        end_row = start_row;
+                        end_col = start_col;
+                    }
+                
+                    // Validate range
+                    if (start_row < 0 || start_row >= sheet->rows || 
+                        start_col < 0 || start_col >= sheet->cols ||
+                        end_row < 0 || end_row >= sheet->rows ||
+                        end_col < 0 || end_col >= sheet->cols ||
+                        end_row < start_row || end_col < start_col) {
+                        printf("Invalid range specification\n");
+                        break;
+                    }
+                
+                    // Collect values from range
+                    int rows = end_row - start_row + 1;
+                    int cols = end_col - start_col + 1;
+                    int count = rows * cols;
+                    int* values = malloc(count * sizeof(int));
+                    if (!values) {
+                        printf("Memory allocation failed\n");
+                        break;
+                    }
+                
+                    int idx = 0;
+                    for (int r = start_row; r <= end_row; r++) {
+                        for (int c = start_col; c <= end_col; c++) {
+                            values[idx++] = sheet->cells[r][c].value;
+                        }
+                    }
+                
+                    // Apply function
+                    if (setfunc(&sheet->cells[target_row][target_col], values, count, opcode) != 0) {
+                        printf("Error applying function to range\n");
+                    }
+                
+                    free(values);
+                    display(sheet);
+                    break;
                 }
                 
-                // Apply function
-                int opcode = atoi(cmd->args[2]);
-                if (setfunc(&sheet->cells[target_row][target_col], values, count, opcode) != 0) {
-                    printf("Error applying function to range\n");
-                }
-                
-                free(values);
-                display(sheet);
-                break;
-            }   
-           // Add other cases as we implement them
+
        }
 
        // Free command and its arguments

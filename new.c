@@ -1,6 +1,7 @@
+#define _POSIX_C_SOURCE 200809L
+#include<string.h>
 #include<stdio.h>
 #include<stdlib.h>
-#include<string.h>
 #include<ctype.h>
 #include<math.h>
 #include<time.h>
@@ -29,8 +30,7 @@ enum CommandType {
     CMD_CONTROL, 
     CMD_SETCONST,    
     CMD_SETARITH,
-    CMD_SETFUNC,  
-    CMD_SETRANGE,   
+    CMD_SETFUNC,   
     CMD_DISABLE_OUTPUT, 
     CMD_ENABLE_OUTPUT,  
     CMD_SCROLL_TO,    
@@ -240,7 +240,6 @@ int evaluate_cell(struct Sheet* sheet, int row, int col) {
     char* formula = strdup(cell->formula);
     if (!formula) return 1;
     
-    int result = 0;
     if (formula[0] >= 'A' && formula[0] <= 'Z' && strchr(formula, '+') == NULL && 
         strchr(formula, '-') == NULL && strchr(formula, '*') == NULL && 
         strchr(formula, '/') == NULL && strchr(formula, '(') == NULL) {
@@ -1102,6 +1101,18 @@ int handle_setarith(struct Sheet* sheet, char* target_cell_ref, char* left_opera
     return 0;
 }
 struct Command* parse_input(char* input) {
+    if (input != NULL) {
+        input[strcspn(input, "\r\n")] = '\0';
+    }
+    if (input == NULL || input[0] == '\0') {
+        struct Command* cmd = malloc(sizeof(struct Command));
+        if(cmd != NULL) {
+            for (int i = 0; i < 4; i++)
+                cmd->args[i] = NULL;
+            cmd->type = CMD_INVALID;
+        }
+        return cmd;
+    }
     struct Command* cmd = malloc(sizeof(struct Command));
     if (cmd == NULL) return NULL;
     

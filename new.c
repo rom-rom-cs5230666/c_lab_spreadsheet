@@ -367,11 +367,45 @@ int evaluate_cell(struct Sheet* sheet, int row, int col) {
         *close_paren = '\0'; 
         char* args = open_paren + 1;
         if (strcmp(func_name, "SLEEP") == 0) {
-            int sleep_time = atoi(args);
+            int sleep_time;
+            
+            // Check if args is a cell reference
+            if (args[0] >= 'A' && args[0] <= 'Z') {
+                int source_row = 0, source_col = 0;
+                int j = 0;
+                while (args[j] >= 'A' && args[j] <= 'Z') {
+                    source_col = source_col * 26 + (args[j] - 'A' + 1);
+                    j++;
+                }
+                source_col--;
+                source_row = atoi(args + j) - 1;
+                
+                if (source_row < 0 || source_row >= sheet->rows || 
+                    source_col < 0 || source_col >= sheet->cols) {
+                    free(formula);
+                    cell->has_error = 1;
+                    return 1;
+                }
+                
+                if (sheet->cells[source_row][source_col].has_error) {
+                    cell->has_error = 1;
+                    free(formula);
+                    return 0;
+                }
+                
+                sleep_time = sheet->cells[source_row][source_col].value;
+                
+                // Add dependency relationship
+                add_dependency(cell, source_row, source_col);
+                add_dependent(&sheet->cells[source_row][source_col], row, col);
+            } else {
+                sleep_time = atoi(args);
+            }
+            
             if (sleep_time <= 0) {
                 free(formula);
                 cell->has_error = 1;
-                return 1; 
+                return 1;
             }
             
             sleep(sleep_time);
@@ -379,7 +413,6 @@ int evaluate_cell(struct Sheet* sheet, int row, int col) {
             free(formula);
             return 0;
         }
-
         int opcode;
         if (strcmp(func_name, "MIN") == 0) opcode = 1;
         else if (strcmp(func_name, "MAX") == 0) opcode = 2;
@@ -615,13 +648,45 @@ int handle_setfunc(struct Sheet* sheet, char* target_cell_ref, char* range_str, 
 
     clear_dependencies(&sheet->cells[target_row][target_col]);
 
-    if (opcode == 6) {
-        int sleep_time = atoi(range_str);
+    if (opcode == 6) {  // SLEEP
+        int sleep_time;
+        
+        // Check if range_str is a cell reference
+        if (range_str[0] >= 'A' && range_str[0] <= 'Z') {
+            int source_row = 0, source_col = 0;
+            int j = 0;
+            while (range_str[j] >= 'A' && range_str[j] <= 'Z') {
+                source_col = source_col * 26 + (range_str[j] - 'A' + 1);
+                j++;
+            }
+            source_col--;
+            source_row = atoi(range_str + j) - 1;
+            
+            if (source_row < 0 || source_row >= sheet->rows || 
+                source_col < 0 || source_col >= sheet->cols) {
+                sheet->cells[target_row][target_col].has_error = 1;
+                return 1;
+            }
+            
+            if (sheet->cells[source_row][source_col].has_error) {
+                sheet->cells[target_row][target_col].has_error = 1;
+                return 0;
+            }
+            
+            sleep_time = sheet->cells[source_row][source_col].value;
+            
+            // Add dependency relationship
+            add_dependency(&sheet->cells[target_row][target_col], source_row, source_col);
+            add_dependent(&sheet->cells[source_row][source_col], target_row, target_col);
+        } else {
+            sleep_time = atoi(range_str);
+        }
+        
         if (sleep_time <= 0) {
             sheet->cells[target_row][target_col].has_error = 1;
-            return 1; 
+            return 1;
         }
-
+        
         char formula[256];
         sprintf(formula, "SLEEP(%s)", range_str);
         free(sheet->cells[target_row][target_col].formula);
@@ -629,7 +694,7 @@ int handle_setfunc(struct Sheet* sheet, char* target_cell_ref, char* range_str, 
         
         sleep(sleep_time);
         sheet->cells[target_row][target_col].value = sleep_time;
-
+        
         return 0;
     }
 
@@ -1096,14 +1161,6 @@ struct Command* parse_input(char* input) {
             cmd->args[0] = strdup(cell);     
             
             if (strcmp(func_name, "SLEEP") == 0) {
-                for (int i = 0; arg[i] != '\0'; i++) {
-                    if (!isdigit(arg[i])) {
-                        printf("SLEEP expects a positive integer as an argument!\n");
-                        cmd->type = CMD_INVALID;
-                        return cmd;
-                    }
-                }
-
                 cmd->args[1] = strdup(arg);
                 cmd->args[2] = strdup("6");
                 return cmd;

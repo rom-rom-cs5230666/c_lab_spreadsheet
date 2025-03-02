@@ -546,13 +546,18 @@ void topological_sort_visit(struct Sheet* sheet, int row, int col, int* visited,
     (*order_idx)++;
 }
 int update_dependencies(struct Sheet* sheet, int row, int col) {
+
     int total_cells = sheet->rows * sheet->cols;
     int* visited = calloc(total_cells, sizeof(int));
     int* eval_order = malloc(total_cells * 2 * sizeof(int));
+    int* in_stack = calloc(total_cells, sizeof(int));
     if (!visited || !eval_order) {
         free(visited);
         free(eval_order);
         return 1; 
+    }
+    if (detect_cycle(sheet, row, col, visited, in_stack)) {
+        sheet->cells[row][col].has_error = 1;
     }
     
     int eval_count = 0;

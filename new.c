@@ -1285,7 +1285,7 @@ int main(int argc, char *argv[]) {
                 if (sheet->suppress_output) {
                     sheet->suppress_output = 0;
                     printf("Output enabled\n");
-                    display(sheet);
+                    
                 }
                 break;
                 
